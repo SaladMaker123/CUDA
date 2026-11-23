@@ -1,0 +1,13 @@
+# Compiled binaries
+*.o
+*.a
+*.so
+*.x
+print-device-info
+
+# Nsight Compute reports
+*.ncu-rep
+
+# Python cache
+__pycache__/
+*.pyc
