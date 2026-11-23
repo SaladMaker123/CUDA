@@ -11,3 +11,9 @@ print-device-info
 # Python cache
 __pycache__/
 *.pyc
+# Benchmark intermediate logs
+operators/gemm/task*/results/*.log
+!operators/gemm/task*/results/out.log
+
+# SASS analysis files
+operators/gemm/task*/results/*-sass.txt
