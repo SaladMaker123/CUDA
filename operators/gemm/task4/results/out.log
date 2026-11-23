@@ -1,0 +1,15 @@
+
+N =  256, BM = 128, BN = 128, BK =   8, TM =   8, TN =   8, Time:   0.038 ms/iter,   0.875 TFLOPS, Max Error: 2.288818e-05
+N =  512, BM = 128, BN = 128, BK =   8, TM =   8, TN =   8, Time:   0.067 ms/iter,   4.025 TFLOPS, Max Error: 4.577637e-05
+N = 1024, BM = 128, BN = 128, BK =   8, TM =   8, TN =   8, Time:   0.124 ms/iter,  17.322 TFLOPS, Max Error: 9.155273e-05
+N = 4096, BM = 128, BN = 128, BK =   8, TM =   8, TN =   8, Time:   5.466 ms/iter,  25.143 TFLOPS
+
+N =  256, BM = 128, BN = 128, BK =  16, TM =   8, TN =   8, Time:   0.035 ms/iter,   0.963 TFLOPS, Max Error: 2.288818e-05
+N =  512, BM = 128, BN = 128, BK =  16, TM =   8, TN =   8, Time:   0.061 ms/iter,   4.376 TFLOPS, Max Error: 4.577637e-05
+N = 1024, BM = 128, BN = 128, BK =  16, TM =   8, TN =   8, Time:   0.113 ms/iter,  18.947 TFLOPS, Max Error: 9.155273e-05
+N = 4096, BM = 128, BN = 128, BK =  16, TM =   8, TN =   8, Time:   4.950 ms/iter,  27.766 TFLOPS
+
+N =  256, BM = 256, BN = 256, BK =  16, TM =   8, TN =   8, Time:   0.537 ms/iter,   0.063 TFLOPS, Max Error: 2.288818e-05
+N =  512, BM = 256, BN = 256, BK =  16, TM =   8, TN =   8, Time:   1.884 ms/iter,   0.142 TFLOPS, Max Error: 4.577637e-05
+N = 1024, BM = 256, BN = 256, BK =  16, TM =   8, TN =   8, Time:   3.715 ms/iter,   0.578 TFLOPS, Max Error: 9.155273e-05
+N = 4096, BM = 256, BN = 256, BK =  16, TM =   8, TN =   8, Time:  94.607 ms/iter,   1.453 TFLOPS
