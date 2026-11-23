@@ -1,0 +1,27 @@
+========== GPU Information ==========
+GPU Name: NVIDIA GeForce RTX 5070 Ti
+Compute Capability: 12.0
+SM Count: 70
+Core Clock: 2452.00 MHz
+Memory Clock: 14001.00 MHz
+
+========== Memory Information ==========
+Total Global Memory: 15.47 GiB
+Free Global Memory: 15.24 GiB
+Memory Bus Width: 256 bits
+L2 Cache Size: 49152.00 KiB
+Shared Memory Per SM: 100.00 KiB
+Shared Memory Per Block: 48.00 KiB
+Opt-in Shared Memory Per Block: 99.00 KiB
+
+========== Thread Resources ==========
+Warp Size: 32
+Max Threads Per SM: 1536
+Max Blocks Per SM: 24
+Max Threads Per Block: 1024
+Registers Per SM: 65536
+Registers Per Block: 65536
+Max Threads Per Block Dimension: 1024, 1024, 64
+Max Grid Dimensions: 2147483647, 65535, 65535
+
+Task 0 Device Query Completed.
