@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstddef>
 #include <vector>
 
 // =====================================
@@ -30,9 +31,9 @@ do {                                                      \
 #define DRIVER_CHECK(call)                                \
 do {                                                      \
     CUresult err = (call);                                \
-    if (err != CUDA_SUCCESS) {                           \
+    if (err != CUDA_SUCCESS) {                            \
         const char* msg = nullptr;                       \
-        cuGetErrorString(err, &msg);                     \
+        cuGetErrorString(err, &msg);                       \
         fprintf(stderr, "Driver error: %s, %s\n",         \
                 #call, msg ? msg : "Unknown error");      \
         std::exit(EXIT_FAILURE);                          \
@@ -45,9 +46,9 @@ do {                                                      \
 #define CUBLAS_CHECK(call)                                \
 do {                                                      \
     cublasStatus_t status = (call);                        \
-    if (status != CUBLAS_STATUS_SUCCESS) {                \
+    if (status != CUBLAS_STATUS_SUCCESS) {                 \
         fprintf(stderr, "cuBLAS error: %s, code=%d\n",     \
-                #call, static_cast<int>(status));         \
+                #call, static_cast<int>(status));          \
         std::exit(EXIT_FAILURE);                          \
     }                                                     \
 } while (0)
@@ -139,7 +140,8 @@ int benchmark_hgemm(
     int K,
     bool check_result,
     int warmup = 10,
-    int repeat = 20
+    int repeat = 20,
+    size_t sharedBytes = 0
 )
 {
     // =====================================
@@ -250,7 +252,7 @@ int benchmark_hgemm(
     if (check_result)
     {
         // Run Custom Kernel
-        kernel<<<grid, block>>>(
+        kernel<<<grid, block, sharedBytes>>>(
             descA, descB,
             dC, M, N, K
         );
@@ -370,7 +372,7 @@ int benchmark_hgemm(
     // =====================================
     for (int i = 0; i < warmup; ++i)
     {
-        kernel<<<grid, block>>>(
+        kernel<<<grid, block, sharedBytes>>>(
             descA, descB,
             dC, M, N, K
         );
@@ -392,7 +394,7 @@ int benchmark_hgemm(
 
     for (int i = 0; i < repeat; ++i)
     {
-        kernel<<<grid, block>>>(
+        kernel<<<grid, block, sharedBytes>>>(
             descA, descB,
             dC, M, N, K
         );
