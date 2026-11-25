@@ -8,7 +8,7 @@ LDLIBS := -lcublas
 COMMON := ../../../common/cuda_check.h \
           ../../../common/cublas_check.h
 
-VERSIONS := sgemm-v0
+VERSIONS := $(basename $(wildcard sgemm-v*.cu))
 
 BINS := $(addsuffix .x,$(VERSIONS)) cublas_benchmark.x
 
