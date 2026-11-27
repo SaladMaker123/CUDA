@@ -24,7 +24,13 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MINILLM_DIR="${ROOT_DIR}/minillm-cuda"
 VENV_DIR="${MINILLM_DIR}/.venv"
 
+APT_PROTECTION_FILE="/etc/apt/apt.conf.d/99cuda-driver-protection"
+
 INSTALL_NCU=0
+PAUSE_AUTO_UPDATES=0
+PROTECT_ONLY=0
+
+RESTORE_TIMERS=()
 
 # ============================================================
 # 0. Common functions and arguments
@@ -48,6 +54,12 @@ for arg in "$@"; do
         --with-ncu)
             INSTALL_NCU=1
             ;;
+        --pause-auto-updates)
+            PAUSE_AUTO_UPDATES=1
+            ;;
+        --protect-only)
+            PROTECT_ONLY=1
+            ;;
         *)
             fail "Unknown argument: ${arg}"
             ;;
@@ -61,7 +73,26 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 TEMP_DIR="$(mktemp -d)"
-trap 'rm -rf "${TEMP_DIR}"' EXIT
+
+cleanup()
+{
+    local status=$?
+
+    rm -rf "${TEMP_DIR}" || true
+
+    if [[ "${PAUSE_AUTO_UPDATES}" -eq 0 ]]; then
+        for timer in "${RESTORE_TIMERS[@]}"; do
+            if ! systemctl start "${timer}"; then
+                echo "WARNING: Failed to restart ${timer}." >&2
+                status=1
+            fi
+        done
+    fi
+
+    return "${status}"
+}
+
+trap cleanup EXIT
 
 # Prevent accidental NVIDIA driver replacement.
 safe_install()
@@ -71,14 +102,14 @@ safe_install()
     plan="$(apt-get -s install "$@")"
 
     if grep -Eq \
-        '^(Inst|Remv) (cuda-drivers|cuda-compat-|nvidia-driver|nvidia-dkms|nvidia-open|nvidia-kernel|nvidia-utils|nvidia-compute-utils|nvidia-firmware|libnvidia-|linux-modules-nvidia|xserver-xorg-video-nvidia)' \
+        '^(Inst|Remv) (cuda-drivers|cuda-compat-|nvidia-|libnvidia-|linux-modules-nvidia-|linux-objects-nvidia-|linux-signatures-nvidia-|xserver-xorg-video-nvidia)' \
         <<< "${plan}"; then
 
         echo "${plan}"
         fail "APT would modify NVIDIA driver packages."
     fi
 
-    apt-get install -y "$@"
+    apt-get install -y --no-remove "$@"
 }
 
 package_installed()
@@ -110,16 +141,90 @@ package_available()
     '
 }
 
+check_apt_status()
+{
+    local state
+    local audit
+
+    for service in apt-daily.service apt-daily-upgrade.service; do
+
+        state="$(systemctl show \
+            --property=ActiveState \
+            --value "${service}")"
+
+        if [[ "${state}" != "inactive" ]]; then
+
+            systemctl status "${service}" --no-pager || true
+
+            fail "${service} is ${state}. Resolve it before setup."
+        fi
+    done
+
+    if command -v fuser >/dev/null 2>&1; then
+
+        if fuser \
+            /var/lib/dpkg/lock-frontend \
+            /var/lib/dpkg/lock \
+            /var/lib/apt/lists/lock \
+            /var/cache/apt/archives/lock \
+            >/dev/null 2>&1; then
+
+            fail "APT or dpkg is currently busy."
+        fi
+    fi
+
+    audit="$(dpkg --audit)"
+
+    if [[ -n "${audit}" ]]; then
+        echo "${audit}"
+        fail "Unfinished package configuration detected."
+    fi
+}
+
+check_driver_consistency()
+{
+    local loaded_driver
+    local installed_driver
+
+    if [[ -r /proc/driver/nvidia/version ]]; then
+
+        loaded_driver="$(awk 'NR == 1 {
+            for (i = 1; i <= NF; ++i) {
+                if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) {
+                    print $i
+                    exit
+                }
+            }
+        }' /proc/driver/nvidia/version)"
+
+        installed_driver="$(modinfo -F version nvidia 2>/dev/null || true)"
+
+        echo "Loaded NVIDIA driver: ${loaded_driver}"
+        echo "Installed NVIDIA driver: ${installed_driver}"
+
+        if [[ -n "${loaded_driver}" &&
+              -n "${installed_driver}" &&
+              "${loaded_driver}" != "${installed_driver}" ]]; then
+
+            fail "NVIDIA driver mismatch. Reboot the instance first."
+        fi
+    fi
+
+    nvidia-smi -L ||
+        fail "NVIDIA GPU initialization failed."
+}
+
 # ============================================================
-# 1. Check system and NVIDIA driver
+# 1. Check system and protect automatic updates
 # ============================================================
 
-section "[1/10] Checking system and NVIDIA driver"
+section "[1/10] Checking system and automatic updates"
 
 source /etc/os-release
 
 if [[ "${ID}" != "ubuntu" ||
       "${VERSION_ID}" != "22.04" && "${VERSION_ID}" != "24.04" ]]; then
+
     fail "Ubuntu 22.04 or 24.04 is required."
 fi
 
@@ -127,35 +232,72 @@ if [[ "$(uname -m)" != "x86_64" ]]; then
     fail "x86_64 architecture is required."
 fi
 
+command -v systemctl >/dev/null 2>&1 ||
+    fail "systemctl is unavailable."
+
+if [[ ! -d /run/systemd/system ]]; then
+    fail "This script requires a systemd-based Ubuntu VM."
+fi
+
+# Protect NVIDIA driver packages from unattended upgrades.
+cat > "${APT_PROTECTION_FILE}" <<'APT_EOF'
+Unattended-Upgrade::Package-Blacklist {
+    "^nvidia-";
+    "^libnvidia-";
+    "^cuda-drivers";
+    "^cuda-compat-";
+    "^linux-modules-nvidia-";
+    "^linux-objects-nvidia-";
+    "^linux-signatures-nvidia-";
+    "^xserver-xorg-video-nvidia-";
+};
+APT_EOF
+
+chmod 644 "${APT_PROTECTION_FILE}"
+
+echo "NVIDIA driver automatic update protection enabled."
+
+# Stop timers before package installation.
+# Restore previously active timers unless explicitly disabled.
+if [[ "${PAUSE_AUTO_UPDATES}" -eq 1 ]]; then
+
+    systemctl disable --now \
+        apt-daily.timer \
+        apt-daily-upgrade.timer
+
+    echo "WARNING: Automatic system updates paused."
+    echo "Manual APT updates remain available."
+
+else
+
+    for timer in apt-daily.timer apt-daily-upgrade.timer; do
+
+        if systemctl is-active --quiet "${timer}"; then
+
+            RESTORE_TIMERS+=("${timer}")
+
+            systemctl stop "${timer}"
+        fi
+    done
+
+    echo "Automatic update timers paused during setup."
+fi
+
+# Never interrupt an active package installation.
+check_apt_status
+
+if [[ "${PROTECT_ONLY}" -eq 1 ]]; then
+
+    echo "PASS: Automatic update protection configured."
+
+    exit 0
+fi
+
+# Check NVIDIA driver.
 command -v nvidia-smi >/dev/null 2>&1 ||
     fail "nvidia-smi is unavailable."
 
-if [[ -r /proc/driver/nvidia/version ]]; then
-
-    LOADED_DRIVER="$(awk 'NR == 1 {
-        for (i = 1; i <= NF; ++i) {
-            if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) {
-                print $i
-                exit
-            }
-        }
-    }' /proc/driver/nvidia/version)"
-
-    INSTALLED_DRIVER="$(modinfo -F version nvidia 2>/dev/null || true)"
-
-    echo "Loaded NVIDIA driver: ${LOADED_DRIVER}"
-    echo "Installed NVIDIA driver: ${INSTALLED_DRIVER}"
-
-    if [[ -n "${LOADED_DRIVER}" &&
-          -n "${INSTALLED_DRIVER}" &&
-          "${LOADED_DRIVER}" != "${INSTALLED_DRIVER}" ]]; then
-
-        fail "NVIDIA driver mismatch. Reboot the instance first."
-    fi
-fi
-
-nvidia-smi -L ||
-    fail "NVIDIA GPU initialization failed."
+check_driver_consistency
 
 GPU_NAME="$(nvidia-smi --query-gpu=name \
     --format=csv,noheader | sed -n '1p')"
@@ -203,6 +345,7 @@ safe_install \
     git \
     wget \
     ca-certificates \
+    psmisc \
     python3 \
     python3-dev \
     python3-pip \
@@ -222,13 +365,16 @@ section "[3/10] Installing CUDA Toolkit"
 NEED_REPO=0
 
 if ! package_installed "${CUDA_PKG}"; then
+
     if ! package_available "${CUDA_PKG}" "${CUDA_VERSION}"; then
         NEED_REPO=1
     fi
 fi
 
 if [[ "${INSTALL_NCU}" -eq 1 ]]; then
+
     if ! package_installed "${NCU_PKG}"; then
+
         if ! package_available "${NCU_PKG}" "${NCU_VERSION}"; then
             NEED_REPO=1
         fi
@@ -256,6 +402,7 @@ if ! package_installed "${CUDA_PKG}"; then
     safe_install "${CUDA_PKG}=${CUDA_VERSION}"
 
 else
+
     echo "CUDA Toolkit is already installed."
 fi
 
@@ -271,12 +418,14 @@ if [[ "${INSTALL_NCU}" -eq 1 ]]; then
         safe_install "${NCU_PKG}=${NCU_VERSION}"
 
     else
+
         echo "Nsight Compute is already installed."
     fi
 
     check_package_version "${NCU_PKG}" "${NCU_VERSION}"
 
 else
+
     echo "Dedicated Nsight Compute installation skipped."
 fi
 
@@ -291,10 +440,18 @@ BASHRC_LINE="source ${ENV_FILE}"
 
 cat > "${ENV_FILE}" <<'ENV_EOF'
 export CUDA_HOME=/usr/local/cuda-13.0
-export PATH="${CUDA_HOME}/bin:${PATH}"
 
-if [[ -x /opt/nvidia/nsight-compute/2025.2.0/ncu ]]; then
-    export PATH="/opt/nvidia/nsight-compute/2025.2.0:${PATH}"
+case ":${PATH}:" in
+    *":${CUDA_HOME}/bin:"*) ;;
+    *) export PATH="${CUDA_HOME}/bin:${PATH}" ;;
+esac
+
+if [ -x /opt/nvidia/nsight-compute/2025.2.0/ncu ]; then
+
+    case ":${PATH}:" in
+        *":/opt/nvidia/nsight-compute/2025.2.0:"*) ;;
+        *) export PATH="/opt/nvidia/nsight-compute/2025.2.0:${PATH}" ;;
+    esac
 fi
 ENV_EOF
 
@@ -303,10 +460,12 @@ chmod 644 "${ENV_FILE}"
 touch /root/.bashrc
 
 if ! grep -Fxq "${BASHRC_LINE}" /root/.bashrc; then
+
     printf '\n%s\n' "${BASHRC_LINE}" >> /root/.bashrc
 fi
 
 source "${ENV_FILE}"
+
 hash -r
 
 NVCC_PATH="$(command -v nvcc || true)"
@@ -335,8 +494,11 @@ section "[5/10] Creating Python virtual environment"
 mkdir -p "${MINILLM_DIR}"
 
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+
     python3 -m venv "${VENV_DIR}"
+
 else
+
     echo "Python virtual environment already exists."
 fi
 
@@ -480,7 +642,9 @@ section "[9/10] Testing PyTorch CUDA Extension"
 
 cat > "${TEMP_DIR}/bindings.cpp" <<'CPP_EOF'
 #include <torch/extension.h>
+#include <cuda_runtime_api.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/cuda/CUDAGuard.h>
 
 cudaError_t launch_test(
     const float* input,
@@ -496,6 +660,8 @@ torch::Tensor test(torch::Tensor input)
     TORCH_CHECK(input.scalar_type() == torch::kFloat32,
                 "Input must be float32.");
     TORCH_CHECK(input.numel() > 0, "Input must not be empty.");
+
+    const c10::cuda::CUDAGuard deviceGuard(input.device());
 
     auto output = torch::empty_like(input);
 
@@ -598,6 +764,7 @@ section "[10/10] Optional performance profiling"
 if [[ "${INSTALL_NCU}" -eq 1 ]]; then
 
     if [[ ! -x "${NCU_DIR}/ncu" ]]; then
+
         fail "Pinned Nsight Compute executable was not found."
     fi
 
@@ -618,8 +785,8 @@ if [[ "${INSTALL_NCU}" -eq 1 ]]; then
         else
 
             cat "${TEMP_DIR}/ncu.log"
-            echo "WARNING: No performance metrics were collected."
 
+            echo "WARNING: No performance metrics were collected."
         fi
 
     else
@@ -627,8 +794,11 @@ if [[ "${INSTALL_NCU}" -eq 1 ]]; then
         cat "${TEMP_DIR}/ncu.log"
 
         if grep -q 'ERR_NVGPUCTRPERM' "${TEMP_DIR}/ncu.log"; then
+
             echo "WARNING: GPU performance-counter permission denied."
+
         else
+
             echo "WARNING: Nsight Compute profiling failed."
         fi
 
@@ -636,14 +806,23 @@ if [[ "${INSTALL_NCU}" -eq 1 ]]; then
     fi
 
 else
+
     echo "Nsight Compute profiling skipped."
 fi
 
-# Check whether the existing driver was preserved.
+# ============================================================
+# Final driver consistency check
+# ============================================================
+
+section "Checking final NVIDIA driver status"
+
+check_driver_consistency
+
 CURRENT_DRIVER="$(nvidia-smi --query-gpu=driver_version \
     --format=csv,noheader | sed -n '1p')"
 
 if [[ "${CURRENT_DRIVER}" != "${DRIVER_VERSION}" ]]; then
+
     fail "NVIDIA driver version changed unexpectedly."
 fi
 
@@ -665,9 +844,25 @@ echo "Project root:    ${ROOT_DIR}"
 echo "Python venv:     ${VENV_DIR}"
 
 echo
+echo "PASS: NVIDIA driver consistency"
+echo "PASS: NVIDIA automatic update protection"
 echo "PASS: Native CUDA computation"
 echo "PASS: PyTorch CUDA computation"
 echo "PASS: PyTorch CUDA Extension"
+
+if [[ "${PAUSE_AUTO_UPDATES}" -eq 1 ]]; then
+
+    echo
+    echo "Automatic system updates: PAUSED"
+    echo "Restore automatic update timers with:"
+    echo "systemctl enable --now apt-daily.timer apt-daily-upgrade.timer"
+
+else
+
+    echo
+    echo "Previously active automatic update timers will be restored."
+fi
+
 echo
 echo "Activate the Python environment with:"
 echo "source \"${VENV_DIR}/bin/activate\""
