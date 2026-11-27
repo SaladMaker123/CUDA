@@ -8,12 +8,44 @@ print-device-info
 # Nsight Compute reports
 *.ncu-rep
 
+# Python virtual environments
+.venv/
+venv/
+
 # Python cache
 __pycache__/
 *.pyc
-# Benchmark intermediate logs
+*.pyo
+.pytest_cache/
+
+# PyTorch extension build files
+torch_extensions/
+build/
+*.egg-info/
+
+# Model weights and cache
+.cache/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.gguf
+
+# Nsight Systems reports
+*.nsys-rep
+*.sqlite
+
+# MiniLLM temporary logs
+minillm-cuda/**/*.log
+
+# GEMM benchmark intermediate logs
 operators/gemm/task*/results/*.log
 !operators/gemm/task*/results/out.log
 
 # SASS analysis files
 operators/gemm/task*/results/*-sass.txt
+
+# Credentials
+.env
+.env.*
+!.env.example
