@@ -16,6 +16,7 @@ TORCH_VERSION="2.9.1+cu130"
 TRANSFORMERS_VERSION="4.57.6"
 ACCELERATE_VERSION="1.11.0"
 NUMPY_VERSION="1.26.4"
+FLASHINFER_VERSION="0.7.6"
 
 CUDA_HOME="/usr/local/cuda-13.0"
 NCU_DIR="/opt/nvidia/nsight-compute/2025.2.0"
@@ -526,6 +527,14 @@ section "[6/10] Installing PyTorch and Python dependencies"
     "accelerate==${ACCELERATE_VERSION}" \
     "numpy==${NUMPY_VERSION}"
 
+"${PYTHON}" -m pip freeze | \
+    grep -Ei '^(torch|torchvision|torchaudio|transformers|accelerate|numpy|triton|nvidia-.*)==' \
+    > "${TEMP_DIR}/flashinfer_constraints.txt"
+
+"${PYTHON}" -m pip install \
+    "flashinfer-python==${FLASHINFER_VERSION}" \
+    -c "${TEMP_DIR}/flashinfer_constraints.txt"
+
 "${PYTHON}" -m pip check
 
 # ============================================================
@@ -598,6 +607,10 @@ import torch
 import transformers
 import accelerate
 import numpy
+import flashinfer
+
+from importlib.metadata import version
+from flashinfer.norm import rmsnorm
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -606,12 +619,14 @@ print("PyTorch CUDA:", torch.version.cuda)
 print("Transformers:", transformers.__version__)
 print("Accelerate:", accelerate.__version__)
 print("NumPy:", numpy.__version__)
+print("FlashInfer:", version("flashinfer-python"))
 
 assert torch.__version__ == "2.9.1+cu130"
 assert torch.version.cuda == "13.0"
 assert transformers.__version__ == "4.57.6"
 assert accelerate.__version__ == "1.11.0"
 assert numpy.__version__ == "1.26.4"
+assert version("flashinfer-python") == "0.7.6"
 
 assert torch.cuda.is_available(), "CUDA is unavailable."
 
@@ -632,6 +647,32 @@ torch.cuda.synchronize()
 assert torch.all(c == 128).item()
 
 print("PASS: PyTorch CUDA FP16 matrix multiplication.")
+
+torch.manual_seed(42)
+
+x = torch.randn(
+    (37, 896), device="cuda", dtype=torch.float16
+)
+w = torch.ones(
+    896, device="cuda", dtype=torch.float16
+)
+
+y = rmsnorm(x, w, eps=1e-6)
+
+xf = x.float()
+expected = (
+    xf * torch.rsqrt(
+        xf.square().mean(dim=-1, keepdim=True) + 1e-6
+    ) * w.float()
+).half()
+
+torch.cuda.synchronize()
+
+torch.testing.assert_close(
+    y, expected, atol=2e-3, rtol=2e-3
+)
+
+print("PASS: FlashInfer CUDA RMSNorm.")
 PYTHON_EOF
 
 # ============================================================
@@ -839,6 +880,7 @@ echo "PyTorch:         ${TORCH_VERSION}"
 echo "Transformers:    ${TRANSFORMERS_VERSION}"
 echo "Accelerate:      ${ACCELERATE_VERSION}"
 echo "NumPy:           ${NUMPY_VERSION}"
+echo "FlashInfer:      ${FLASHINFER_VERSION}"
 echo "CUDA_HOME:       ${CUDA_HOME}"
 echo "Project root:    ${ROOT_DIR}"
 echo "Python venv:     ${VENV_DIR}"
@@ -849,6 +891,7 @@ echo "PASS: NVIDIA automatic update protection"
 echo "PASS: Native CUDA computation"
 echo "PASS: PyTorch CUDA computation"
 echo "PASS: PyTorch CUDA Extension"
+echo "PASS: FlashInfer CUDA RMSNorm"
 
 if [[ "${PAUSE_AUTO_UPDATES}" -eq 1 ]]; then
 
