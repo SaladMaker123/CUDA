@@ -8,6 +8,7 @@ SOURCES = [
     ROOT_DIR / "minillm-cuda/csrc/bindings.cpp",
     ROOT_DIR / "operators/vector_add/vector_add.cu",
     ROOT_DIR / "operators/rmsnorm/rmsnorm_v0.cu",
+    ROOT_DIR / "operators/rmsnorm/rmsnorm_v1.cu",
 ]
 
 
@@ -31,6 +32,10 @@ def rmsnorm_v0(X, W, eps=1e-6):
     return get_extension().rmsnorm_v0(X, W, eps)
 
 
+def rmsnorm_v1(X, W, eps=1e-6):
+    return get_extension().rmsnorm_v1(X, W, eps)
+
+
 if __name__ == "__main__":
     module = get_extension()
 
@@ -38,3 +43,4 @@ if __name__ == "__main__":
     print("Module path:", module.__file__)
     print("Vector Add available:", hasattr(module, "vector_add"))
     print("RMSNorm V0 available:", hasattr(module, "rmsnorm_v0"))
+    print("RMSNorm V1 available:", hasattr(module, "rmsnorm_v1"))

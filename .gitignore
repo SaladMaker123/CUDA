@@ -51,4 +51,4 @@ operators/gemm/task*/results/*-sass.txt
 !.env.example
 # Nsight Compute profiling reports
 *.ncu-rep
-**/ncu/*.csv
+**/ncu/**/*.csv

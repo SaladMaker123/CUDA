@@ -4,12 +4,13 @@ import torch
 
 from transformers.models.qwen2.modeling_qwen2 import Qwen2RMSNorm
 
-from minillm.extension import get_extension, rmsnorm_v0
+from minillm.extension import get_extension, rmsnorm_v0, rmsnorm_v1
 
 
 # Registered CUDA implementations
 IMPLEMENTATIONS = {
     "v0": rmsnorm_v0,
+    "v1": rmsnorm_v1,
 }
 
 
