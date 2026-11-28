@@ -4,12 +4,13 @@ import torch
 
 from flashinfer.norm import rmsnorm as flashinfer_rmsnorm
 
-from minillm.extension import get_extension, rmsnorm_v0, rmsnorm_v1
+from minillm.extension import get_extension, rmsnorm_v0, rmsnorm_v1, rmsnorm_v2
 
 
 IMPLEMENTATIONS = {
     "v0": rmsnorm_v0,
     "v1": rmsnorm_v1,
+    "v2": rmsnorm_v2,
     "flashinfer": flashinfer_rmsnorm,
 }
 
